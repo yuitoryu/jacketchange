@@ -18,17 +18,21 @@ class Jacket:
 
 class DiffManager:
     @beartype
-    def __init__(self, info: dict[str, dict[str, str]]):
-        song = [k for k in info.keys()][0]
-        diffs = [ int(k) for k in info[song].keys() ]
-        self.jackets: list[Jacket | None] = [None] * 6
+    def __init__(self, id: str, jacket_t_loc: dict[str, str], diff_list: list[int]):
+        # self.jacket_t_loc = sorted({int(k): v for k, v in jacket_t_loc.items()})
+        self.jackets = sorted(int(k) for k in jacket_t_loc.keys())
+        self.diffs = {diff:i for i, diff in enumerate(diff_list)}
         
-        for i, diff in enumerate(diffs):
+        # 填充曲绘文件使用情况
+        self.jacket_usage: list[None | Jacket]= [None] * len(self.diffs)
+        for i, diff in enumerate(self.jackets):
             cur = Jacket(diff, diff)
-            for j in range(i, 6):
-                self.jackets[j] = cur
-    
+            for j in range(self.diffs[diff], len(self.jacket_usage)):
+                self.jacket_usage[j] = cur
+
+        
     def __repr__(self) -> str:
-        return "\n".join(str(jacket) for jacket in self.jackets)
+        return '\n'.join([ jacket.__repr__() for jacket in self.jacket_usage])
+        
             
             
