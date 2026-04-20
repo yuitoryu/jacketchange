@@ -7,10 +7,12 @@ class ImageProcessError(Exception):
 class ImageSizeError(ImageProcessError):
     def __init__(self):
         self.message = '图片长宽不一致'
+        print(self.message)
 
 class ImageLoadError(ImageProcessError):
     def __init__(self, path):
         self.message = f'无法加载{path}'
+        print(self.message)
 
 def resize(id: str, level: int, input_path: str, allow_morphism: bool = False) -> list[Image.Image]:
     try:

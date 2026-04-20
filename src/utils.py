@@ -5,6 +5,7 @@ from beartype import beartype
 import xml.etree.ElementTree as ET
 import json
 from tqdm import tqdm
+import shutil
 
 @beartype
 def find_jacket_files(graphics_path:  Path) -> list[Path]:
@@ -121,3 +122,38 @@ def fetch_diff_list(music: Path, id: str, pattern: re.Pattern[str], record: dict
         if match:
             lst.append(match.group('tag'))
     record[id] = [int(s[0]) for s in lst]
+
+def find_song_folder(music_path: Path, song_id: str) -> Path | None:
+    pattern = re.compile(rf"^{song_id}(?:_[^_]+){{2,}}$")
+    for fd in music_path.iterdir():
+        match = pattern.match(fd.name)
+        if match:
+            return fd
+    
+@beartype
+def copy_jacket_to_other_difficulty(source_diff: int, target_diff: int, song_id: str, jacket_t_loc: dict[str, str], sdvx_path: Path) -> None:
+    copy_regular_jacket_to_other_difficulty(source_diff, target_diff, song_id, sdvx_path)
+
+@beartype
+def copy_regular_jacket_to_other_difficulty(source_diff: int, target_diff: int, song_id: str, sdvx_path: Path) -> None:
+    music_path = Path('data/music')
+    song_path = find_song_folder(music_path, song_id)
+    if song_path is None:
+        raise Exception('Music data does not exist')
+    
+    basic_name = f'jk_{song_id}_'
+    suffices = ['.png', '_b.png', '_s.png']
+    for suffix in suffices:
+        source_path = song_path / (basic_name + str(source_diff) + suffix)
+        target_path = song_path / (basic_name + str(target_diff) + suffix)
+        shutil.copy2(source_path, target_path)
+    
+@beartype
+def copy_t_jacket_to_other_difficulty(source_diff: int, target_diff: int, song_id: str, jacket_t_loc: dict[str, str]) -> None:    
+    ifs_id = jacket_t_loc[str(target_diff)]
+    root = Path('data/ifs_unpacked')
+    basic_name = f'jk_{song_id}_'
+    suffix = '_t.png'
+    source_path = root / ( basic_name + str(source_diff) + suffix )
+    target_path = root / ( basic_name + str(target_diff) + suffix )
+    shutil.copy2(source_path, target_path)

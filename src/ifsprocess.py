@@ -63,8 +63,9 @@ def pack(ifs_folder: Path, out_path: Path) -> None:
 @beartype
 def copy_and_analyze_all_ifs(sdvx_path: Path, data_storage: Path) -> None:
     unpacked = data_storage / 'ifs_unpacked'
+    packed = data_storage / 'ifs_packed'
     
-    copied_path = copy_jk_ifs(sdvx_path, unpacked)
+    copied_path = copy_jk_ifs(sdvx_path, packed)
     
     print('Start unpacking ifs files...')
     for f in copied_path:
