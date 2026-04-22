@@ -56,7 +56,7 @@ def main() -> None:
     if args.apply:
         if not utils.sdvx_folder_checker(sdvx_path):
             raise ValueError("This is not a valid sdvx contents folder!")
-        ifsprocess.pack(data_path / "ifs_unpacked", sdvx_path / "data" / "graphics")
+        ifsprocess.apply_packed_ifs(data_path, sdvx_path)
         utils.update_song_folders(sdvx_path, data_path)
 
 
