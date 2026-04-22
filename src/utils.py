@@ -210,20 +210,25 @@ def copy_image_node_in_xml(xml_path: Path, source_path: Path, target_path: Path)
     target_name = target_path.stem
 
     source_image = None
+    target_image = None
     for image in root.iter("image"):
         if image.get("name") == source_name:
             source_image = image
-            break
+        if image.get("name") == target_name:
+            target_image = image
 
     if source_image is None:
         raise ValueError(f"Cannot find image node: {source_name}")
 
-    for image in root.iter("image"):
-        if image.get("name") == target_name:
-            return
+    if target_image is not None:
+        if target_name != source_name and rects_equal(source_image, target_image):
+            assign_new_image_rect(root, source_image, target_image)
+            tree.write(xml_path, encoding="utf-8", xml_declaration=True)
+        return
 
     new_image = copy.deepcopy(source_image)
     new_image.set("name", target_name)
+    assign_new_image_rect(root, source_image, new_image)
 
     parent = next((elem for elem in root.iter() if source_image in list(elem)), None)
     if parent is None:
@@ -235,6 +240,114 @@ def copy_image_node_in_xml(xml_path: Path, source_path: Path, target_path: Path)
 
     tree.write(xml_path, encoding="utf-8", xml_declaration=True)
 
+
+def parse_rect(node: ET.Element, tag_name: str) -> tuple[int, int, int, int]:
+    rect_node = node.find(tag_name)
+    if rect_node is None or rect_node.text is None:
+        raise ValueError(f"Cannot find {tag_name} for image node {node.get('name')}")
+    values = [int(value) for value in rect_node.text.split()]
+    if len(values) != 4:
+        raise ValueError(f"Invalid {tag_name} value for image node {node.get('name')}")
+    return values[0], values[1], values[2], values[3]
+
+
+def write_rect(node: ET.Element, tag_name: str, rect: tuple[int, int, int, int]) -> None:
+    rect_node = node.find(tag_name)
+    if rect_node is None:
+        raise ValueError(f"Cannot find {tag_name} for image node {node.get('name')}")
+    rect_node.text = f"{rect[0]} {rect[1]} {rect[2]} {rect[3]}"
+
+
+def rects_equal(source_node: ET.Element, target_node: ET.Element) -> bool:
+    return (
+        parse_rect(source_node, "uvrect") == parse_rect(target_node, "uvrect")
+        and parse_rect(source_node, "imgrect") == parse_rect(target_node, "imgrect")
+    )
+
+
+def find_image_by_name(root: ET.Element, image_name: str) -> ET.Element | None:
+    for image in root.iter("image"):
+        if image.get("name") == image_name:
+            return image
+    return None
+
+
+def has_duplicate_rect(root: ET.Element, target_image: ET.Element) -> bool:
+    target_rect = parse_rect(target_image, "imgrect")
+    target_name = target_image.get("name")
+    for image in root.iter("image"):
+        if image is target_image or image.get("name") == target_name:
+            continue
+        if parse_rect(image, "imgrect") == target_rect:
+            return True
+    return False
+
+
+def ensure_unique_image_rect(xml_path: Path, image_name: str) -> None:
+    tree = ET.parse(xml_path)
+    root = tree.getroot()
+
+    target_image = find_image_by_name(root, image_name)
+    if target_image is None:
+        raise ValueError(f"Cannot find image node: {image_name}")
+
+    if has_duplicate_rect(root, target_image):
+        assign_new_image_rect(root, target_image, target_image)
+        tree.write(xml_path, encoding="utf-8", xml_declaration=True)
+
+
+def ensure_song_image_rects_unique(xml_path: Path, song_id: str) -> None:
+    tree = ET.parse(xml_path)
+    root = tree.getroot()
+    pattern = re.compile(rf"^jk_{song_id}_[1-6]_t$")
+    updated = False
+
+    seen_rects: set[tuple[int, int, int, int]] = set()
+    for image in root.iter("image"):
+        name = image.get("name")
+        if name is None or not pattern.fullmatch(name):
+            continue
+
+        current_rect = parse_rect(image, "imgrect")
+        if current_rect in seen_rects:
+            assign_new_image_rect(root, image, image)
+            updated = True
+            current_rect = parse_rect(image, "imgrect")
+        seen_rects.add(current_rect)
+
+    if updated:
+        tree.write(xml_path, encoding="utf-8", xml_declaration=True)
+
+
+def assign_new_image_rect(root: ET.Element, source_image: ET.Element, target_image: ET.Element) -> None:
+    source_imgrect = parse_rect(source_image, "imgrect")
+    width = source_imgrect[1] - source_imgrect[0]
+    height = source_imgrect[3] - source_imgrect[2]
+    if width <= 0 or height <= 0:
+        raise ValueError(f"Invalid imgrect size for image node {source_image.get('name')}")
+
+    occupied: set[tuple[int, int, int, int]] = set()
+    max_x2 = source_imgrect[1]
+    max_y2 = source_imgrect[3]
+    for image in root.iter("image"):
+        imgrect = parse_rect(image, "imgrect")
+        occupied.add(imgrect)
+        max_x2 = max(max_x2, imgrect[1])
+        max_y2 = max(max_y2, imgrect[3])
+
+    max_x2 += width
+    max_y2 += height
+
+    for y in range(0, max_y2 + 1, height):
+        for x in range(0, max_x2 + 1, width):
+            candidate = (x, x + width, y, y + height)
+            if candidate not in occupied:
+                write_rect(target_image, "uvrect", candidate)
+                write_rect(target_image, "imgrect", candidate)
+                return
+
+    raise ValueError(f"Unable to allocate a new atlas rect for {target_image.get('name')}")
+
 @beartype
 def sdvx_folder_checker(sdvx_path: Path) -> bool:
     data = sdvx_path / 'data'
@@ -245,10 +358,21 @@ def sdvx_folder_checker(sdvx_path: Path) -> bool:
     return False
 
 @beartype
-def replace_jacket(song_id: str, diff: int, pic_path: Path, data_storage: Path, ifs_id: str) -> None:
+def replace_jacket(
+    song_id: str,
+    diff: int,
+    pic_path: Path,
+    sdvx_path: Path,
+    data_storage: Path,
+    ifs_id: str,
+) -> None:
     imgs = resize(pic_path, allow_morphism=False) # [regular, big, small, transfer]
     root_name = f'jk_{song_id}_{diff}'
-    song_folder = cast(Path, find_song_folder(data_storage / 'music', song_id))
+    song_folder = ensure_song_folder_copied(
+        song_id=song_id,
+        sdvx_path=sdvx_path,
+        data_storage=data_storage,
+    )
     
     suffices = ['', '_b', '_s'] # transfer另外处理
     for i, suffix in enumerate(suffices):
@@ -258,6 +382,9 @@ def replace_jacket(song_id: str, diff: int, pic_path: Path, data_storage: Path, 
     t_name = root_name + '_t.png'
     final_path = data_storage / 'ifs_unpacked' / f's_jacket{ifs_id}_ifs' / 'tex' / t_name
     imgs[-1].save(final_path)
+    texturelist_path = final_path.parent / "texturelist.xml"
+    ensure_unique_image_rect(texturelist_path, final_path.stem)
+    ensure_song_image_rects_unique(texturelist_path, song_id)
         
 @beartype
 def craft_id(id: str) -> str:
