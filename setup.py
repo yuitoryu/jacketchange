@@ -9,7 +9,7 @@ README = (ROOT / "README.md").read_text(encoding="utf-8")
 
 setup(
     name="sdvxjc",
-    version="0.1.0",
+    version="0.2.0",
     description="CLI tool for initializing and applying SDVX jacket changes.",
     long_description=README,
     long_description_content_type="text/markdown",

@@ -5,17 +5,24 @@ from pathlib import Path
 from beartype import beartype
 from tqdm import tqdm
 
-from .utils import analyze_jacket_t_data, find_jacket_files, find_unpacked_ifs
+from .file_finders import find_jacket_files, find_unpacked_ifs
+from .indexer import analyze_jacket_t_data
 
 
 class FolderStructureError(Exception):
+    """Raised when expected game or workspace folders are missing."""
+
     def __init__(self) -> None:
+        """Create the folder-structure error message."""
+
         self.message = "Invalid game folder structure."
         super().__init__(self.message)
 
 
 @beartype
 def copy_jk_ifs(sdvx_path: Path, copy_path: Path) -> list[Path]:
+    """Copy packed jacket IFS files from the game into a workspace."""
+
     graphics_path = sdvx_path / "data" / "graphics"
     files = find_jacket_files(graphics_path)
 
@@ -33,6 +40,8 @@ def copy_jk_ifs(sdvx_path: Path, copy_path: Path) -> list[Path]:
 
 @beartype
 def unpack(ifs_file: Path, out_path: Path) -> None:
+    """Unpack one IFS file into a workspace directory."""
+
     out_path.mkdir(parents=True, exist_ok=True)
     subprocess.run(
         ["ifstools", "-y", str(ifs_file), "-o", str(out_path)],
@@ -45,6 +54,8 @@ def unpack(ifs_file: Path, out_path: Path) -> None:
 
 @beartype
 def pack(ifs_folder: Path, out_path: Path) -> Path:
+    """Pack one unpacked IFS directory and return the generated file path."""
+
     out_path.mkdir(parents=True, exist_ok=True)
     subprocess.run(
         ["ifstools", "-y", str(ifs_folder), "-o", str(out_path)],
@@ -62,6 +73,8 @@ def pack(ifs_folder: Path, out_path: Path) -> Path:
 
 @beartype
 def repack_all(unpacked_root: Path, out_path: Path) -> list[Path]:
+    """Pack every unpacked jacket IFS directory in a workspace."""
+
     packed_files: list[Path] = []
     unpacked_folders = find_unpacked_ifs(unpacked_root)
 
@@ -74,6 +87,8 @@ def repack_all(unpacked_root: Path, out_path: Path) -> list[Path]:
 
 @beartype
 def apply_packed_ifs(data_storage: Path, sdvx_path: Path) -> None:
+    """Repack workspace IFS folders and copy them into the game folder."""
+
     unpacked_root = data_storage / "ifs_unpacked"
     packed_root = data_storage / "ifs_packed"
     graphics_path = sdvx_path / "data" / "graphics"
@@ -88,8 +103,12 @@ def apply_packed_ifs(data_storage: Path, sdvx_path: Path) -> None:
 
 @beartype
 def copy_and_analyze_all_ifs(sdvx_path: Path, data_storage: Path) -> None:
+    """Initialize a target workspace with copied, unpacked, and indexed IFS data."""
+
     unpacked = data_storage / "ifs_unpacked"
     packed = data_storage / "ifs_packed"
+    unpacked.mkdir(parents=True, exist_ok=True)
+    packed.mkdir(parents=True, exist_ok=True)
 
     copied_path = copy_jk_ifs(sdvx_path, packed)
 

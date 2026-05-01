@@ -3,11 +3,15 @@ from pathlib import Path
 
 from beartype import beartype
 
-from .utils import copy_jacket_to_other_difficulty, replace_jacket
+from .jacket_ops import copy_jacket_to_other_difficulty, replace_jacket
 
 
 class DifficultyNotExistError(Exception):
+    """Raised when a requested difficulty is not indexed for a song."""
+
     def __init__(self, diff_list: list[int], error_diff: int):
+        """Create a user-facing missing-difficulty message."""
+
         self.diff_map = {
             1: "NOV",
             2: "ADV",
@@ -28,38 +32,58 @@ class DifficultyNotExistError(Exception):
 
 @beartype
 class Jacket:
+    """Track one playable difficulty and the jacket image it currently uses."""
+
     def __init__(self, diff_id: int, pic_id: int = -1):
+        """Create a jacket usage record for one difficulty."""
+
         self.diff_id = diff_id
         self.pic_id = pic_id
 
     def set_diff_id(self, new_id: int) -> None:
+        """Update the playable difficulty ID."""
+
         self.diff_id = new_id
 
     def set_pic_id(self, new_id: int) -> None:
+        """Update the source jacket difficulty ID."""
+
         self.pic_id = new_id
 
     def get_diff_id(self) -> int:
+        """Return the playable difficulty ID."""
+
         return self.diff_id
 
     def get_pic_id(self) -> int:
+        """Return the source jacket difficulty ID."""
+
         return self.pic_id
 
     def replace(self, new_id: int) -> None:
+        """Point the difficulty at a replacement jacket with the same ID."""
+
         self.diff_id = new_id
         self.pic_id = new_id
 
     def __repr__(self) -> str:
+        """Return a compact debug representation."""
+
         return str((["id", self.diff_id], ["use_pic", self.pic_id]))
 
 
 @beartype
 class DiffManager:
+    """Coordinate jacket usage for one song in one target workspace."""
+
     def __init__(
         self,
         song_id: str,
         sdvx_path: Path,
         data_storage: Path = Path("data"),
     ):
+        """Load jacket and difficulty indexes for one song."""
+
         self.song_id = song_id
         self.sdvx_path = sdvx_path
         self.data_storage = data_storage
@@ -85,6 +109,8 @@ class DiffManager:
                 jacket.set_pic_id(self.jacket_usage[i - 1].get_pic_id())
 
     def make_independent_jacket(self, jacket: Jacket):
+        """Copy a borrowed jacket so a difficulty can be edited independently."""
+
         source_diff = jacket.get_pic_id()
         target_diff = jacket.get_diff_id()
         copy_jacket_to_other_difficulty(
@@ -99,11 +125,15 @@ class DiffManager:
         jacket.set_pic_id(target_diff)
 
     def ensure_independent_jacket(self, diff: int) -> None:
+        """Ensure a difficulty has its own jacket files before replacement."""
+
         jacket = self.jacket_usage[self.diff_pos[diff]]
         if jacket.get_pic_id() != diff:
             self.make_independent_jacket(jacket)
 
     def replace_jacket(self, diff: int, pic_path: Path):
+        """Replace one difficulty's jacket image in the workspace."""
+
         self.ensure_independent_jacket(diff)
         replace_jacket(
             song_id=self.song_id,
@@ -115,4 +145,6 @@ class DiffManager:
         )
 
     def __repr__(self) -> str:
+        """Return all jacket usage records for debugging."""
+
         return "\n".join([jacket.__repr__() for jacket in self.jacket_usage])

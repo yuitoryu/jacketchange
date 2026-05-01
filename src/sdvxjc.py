@@ -2,24 +2,131 @@ import argparse
 from pathlib import Path
 
 from . import ifsprocess
-from . import utils
+from .indexer import analyze_all_song_difficulty
 from .manager import DiffManager
 from .runtime_config import (
     RuntimeConfigError,
-    load_config_paths,
-    load_registered_paths,
-    save_registered_config,
+    get_current_target,
+    get_current_target_paths,
+    initialize_data_root,
+    list_targets,
+    add_target,
+    remove_target,
+    use_target,
 )
+from .song_assets import update_song_folders
+from .validators import craft_id, sdvx_folder_checker
 
 
-def main() -> None:
+def _print_target(name: str, sdvx_path: Path | str, workspace_path: Path | str) -> None:
+    """Print one target record in a compact CLI-friendly format."""
+
+    print(f"Target: {name}")
+    print(f"  SDVX path: {sdvx_path}")
+    print(f"  Workspace: {workspace_path}")
+
+
+def _handle_init(config_arg: str, force: bool) -> None:
+    """Initialize the global data root from a config file."""
+
+    data_root = initialize_data_root(Path(config_arg), force=force)
+    print(f"Data root initialized: {data_root}")
+
+
+def _handle_add_target(sdvx_arg: str, target_name: str | None) -> None:
+    """Register and initialize an isolated workspace for a game folder."""
+
+    sdvx_path = Path(sdvx_arg).expanduser().resolve()
+    if not sdvx_folder_checker(sdvx_path):
+        raise ValueError("This is not a valid sdvx contents folder!")
+
+    _, previous_target = list_targets()
+    name, resolved_sdvx_path, workspace_path = add_target(sdvx_path, target_name)
+    try:
+        ifsprocess.copy_and_analyze_all_ifs(resolved_sdvx_path, workspace_path)
+        analyze_all_song_difficulty(resolved_sdvx_path, workspace_path)
+    except Exception:
+        remove_target(name)
+        if previous_target is not None:
+            use_target(previous_target)
+        raise
+
+    print(f"Target '{name}' has been added and selected.")
+    _print_target(name, resolved_sdvx_path, workspace_path)
+
+
+def _handle_use_target(name: str) -> None:
+    """Select a saved target by name."""
+
+    target = use_target(name)
+    print(f"Current target switched to '{name}'.")
+    _print_target(name, target["sdvx_path"], target["workspace_path"])
+
+
+def _handle_list_targets() -> None:
+    """Print all saved targets and mark the current one."""
+
+    targets, current_target = list_targets()
+    if not targets:
+        print("No targets registered. Run 'sdvxjc --add-target <sdvx_path>' first.")
+        return
+
+    for name, target in targets.items():
+        marker = "*" if name == current_target else " "
+        print(f"{marker} {name}")
+        print(f"  SDVX path: {target['sdvx_path']}")
+        print(f"  Workspace: {target['workspace_path']}")
+
+
+def _handle_current_target() -> None:
+    """Print the selected target."""
+
+    name, target = get_current_target()
+    _print_target(name, target["sdvx_path"], target["workspace_path"])
+
+
+def _handle_replace(replace_args: list[str]) -> None:
+    """Replace a jacket in the currently selected target workspace."""
+
+    sdvx_path, workspace_path = get_current_target_paths()
+    song_id, diff, pic_path = replace_args
+    manager = DiffManager(
+        song_id=craft_id(song_id),
+        sdvx_path=sdvx_path,
+        data_storage=workspace_path,
+    )
+    manager.replace_jacket(diff=int(diff), pic_path=Path(pic_path))
+
+
+def _handle_apply() -> None:
+    """Apply the current target workspace back to its game folder."""
+
+    sdvx_path, workspace_path = get_current_target_paths()
+    if not sdvx_folder_checker(sdvx_path):
+        raise ValueError("This is not a valid sdvx contents folder!")
+    ifsprocess.apply_packed_ifs(workspace_path, sdvx_path)
+    update_song_folders(sdvx_path, workspace_path)
+
+
+def _main() -> None:
+    """Parse CLI arguments and dispatch to the selected command."""
+
     parser = argparse.ArgumentParser()
     group = parser.add_mutually_exclusive_group(required=True)
 
     group.add_argument("--init", metavar="CONFIG_PY")
+    group.add_argument("--add-target", metavar="SDVX_PATH")
+    group.add_argument("--use-target", metavar="NAME")
+    group.add_argument("--list-targets", action="store_true")
+    group.add_argument("--current-target", action="store_true")
     group.add_argument("--replace", nargs=3, metavar=("ID", "DIFF", "PIC_PATH"))
     group.add_argument("--apply", action="store_true")
 
+    parser.add_argument(
+        "-n",
+        "--name",
+        help="target name to use with --add-target",
+    )
     parser.add_argument(
         "-f",
         "--force",
@@ -30,38 +137,45 @@ def main() -> None:
     args = parser.parse_args()
     if args.force and args.init is None:
         parser.error("-f/--force must be used with --init")
+    if args.name is not None and args.add_target is None:
+        parser.error("-n/--name must be used with --add-target")
 
     if args.init:
-        config_path = Path(args.init)
-        sdvx_path, data_path = load_config_paths(config_path)
-        if not utils.sdvx_folder_checker(sdvx_path):
-            raise ValueError("This is not a valid sdvx contents folder!")
-        data_path.mkdir(parents=True, exist_ok=True)
-        save_registered_config(config_path, force=args.force)
-        ifsprocess.copy_and_analyze_all_ifs(sdvx_path, data_path)
-        utils.analyze_all_song_difficulty(sdvx_path, data_path)
+        _handle_init(args.init, args.force)
         return
 
-    sdvx_path, data_path = load_registered_paths()
+    if args.add_target:
+        _handle_add_target(args.add_target, args.name)
+        return
+
+    if args.use_target:
+        _handle_use_target(args.use_target)
+        return
+
+    if args.list_targets:
+        _handle_list_targets()
+        return
+
+    if args.current_target:
+        _handle_current_target()
+        return
 
     if args.replace:
-        song_id, diff, pic_path = args.replace
-        manager = DiffManager(
-            song_id=utils.craft_id(song_id),
-            sdvx_path=sdvx_path,
-            data_storage=data_path,
-        )
-        manager.replace_jacket(diff=int(diff), pic_path=Path(pic_path))
+        _handle_replace(args.replace)
+        return
 
     if args.apply:
-        if not utils.sdvx_folder_checker(sdvx_path):
-            raise ValueError("This is not a valid sdvx contents folder!")
-        ifsprocess.apply_packed_ifs(data_path, sdvx_path)
-        utils.update_song_folders(sdvx_path, data_path)
+        _handle_apply()
+
+
+def main() -> None:
+    """Run the CLI and render runtime configuration errors cleanly."""
+
+    try:
+        _main()
+    except RuntimeConfigError as exc:
+        raise SystemExit(str(exc)) from exc
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except RuntimeConfigError as exc:
-        raise SystemExit(str(exc)) from exc
+    main()
